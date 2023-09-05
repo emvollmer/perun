@@ -234,17 +234,27 @@ def monitor(
     log.debug(f"Script path: {filePath}")
 
     if module:
-        # if running as a module, construct the module name
-        moduleStr = str(filePath.with_suffix('')).replace('/', '.')
+        # find root package path (doesn't contain __ini__.py) to add to sys.path
+        pkgPath = filePath.absolute().parent
+        while pkgPath:
+            initFile = Path(pkgPath, "__init__.py")
+            if not initFile.is_file():
+                break
+            pkgPath = pkgPath.parent
+
+        # construct the module name
+        moduleStr = str(filePath.absolute().relative_to(pkgPath).with_suffix('')).replace('/', '.')
         sys.argv = [moduleStr] + list(script_args)
+        # add project root directory as system path to search through
+        sys.path.insert(0, str(pkgPath))
     else:
         # if running as a script, keep the original script path
         moduleStr = None
         sys.argv = [script] + list(script_args)
+        # add parent directory to system paths to search through
+        sys.path.insert(0, str(filePath.parent.absolute()))
 
     log.debug(f"Script args: { sys.argv }")
-
-    sys.path.insert(0, str(filePath.parent.absolute()))
 
     perun.monitor_application(filePath, moduleStr)
 
