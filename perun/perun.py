@@ -9,7 +9,8 @@ from configparser import ConfigParser
 from datetime import datetime
 from multiprocessing import Event, Process, Queue
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Type
+from runpy import run_path, run_module
+from typing import Any, Dict, List, Optional, Set, Type, Union
 
 from perun import __version__, log
 from perun.backend.backend import Backend
@@ -186,6 +187,7 @@ class Perun:
     def monitor_application(
         self,
         app: Path,
+        module_name: Union[str, None],
     ):
         """Execute coordination, monitoring, post-processing, and reporting steps, in that order.
 
@@ -193,6 +195,8 @@ class Perun:
         ----------
         app : Path
             App script file path
+        module_name : [str, None]
+            Run script as module with module_name if string is provided, otherwise run as script
         """
         log.debug(f"Rank {self.comm.Get_rank()} Backends: {pp.pformat(self.backends)}")
 
@@ -208,13 +212,13 @@ class Perun:
             log.info(f"Rank {self.comm.Get_rank()} : Started warmup rounds")
             for i in range(self.config.getint("benchmarking", "warmup_rounds")):
                 log.info(f"Warmup run: {i}")
-                _ = self._run_application(app, str(i), record=False)
+                _ = self._run_application(app, module_name, str(i), record=False)
 
         log.info(f"Rank {self.comm.Get_rank()}: Monitoring start")
         multirun_nodes: Dict[str, DataNode] = {}
         for i in range(self.config.getint("benchmarking", "rounds")):
             runNode: Optional[DataNode] = self._run_application(
-                app, str(i), record=True
+                app, module_name, str(i), record=True
             )
             if self.comm.Get_rank() == 0 and runNode:
                 multirun_nodes[str(i)] = runNode
@@ -272,6 +276,7 @@ class Perun:
     def _run_application(
         self,
         app: Path,
+        module_name: Union[str, None],
         run_id: str,
         record: bool = True,
     ) -> Optional[DataNode]:
@@ -311,19 +316,20 @@ class Perun:
             # 3) Start application
             try:
                 sp_ready_event.wait()
-                with open(str(app), "r") as scriptFile:
-                    self.local_regions = LocalRegions()
-                    self.comm.barrier()
-                    log.info(f"Rank {self.comm.Get_rank()}: Started App")
-                    start_event.set()
-                    starttime_ns = time.time_ns()
-                    exec(
-                        scriptFile.read(),
-                        {"__name__": "__main__", "__file__": app.name},
-                    )
-                    # run_stoptime = datetime.utcnow()
-                    log.info(f"Rank {self.comm.Get_rank()}: App Stopped")
-                    stop_event.set()
+                self.local_regions = LocalRegions()
+                self.comm.barrier()
+                log.info(f"Rank {self.comm.Get_rank()}: Started App")
+                start_event.set()
+                starttime_ns = time.time_ns()
+
+                if module_name:
+                    run_module(module_name, run_name="__main__")
+                else:
+                    run_path(str(app), run_name="__main__")
+
+                # run_stoptime = datetime.utcnow()
+                log.info(f"Rank {self.comm.Get_rank()}: App Stopped")
+                stop_event.set()
             except Exception as e:
                 log.error(
                     f"Rank {self.comm.Get_rank()}:  Found error on monitored script: {str(app)}"
@@ -331,7 +337,7 @@ class Perun:
                 stop_event.set()
                 raise e
 
-            # 4) App finished, stop subrocess and get data
+            # 4) App finished, stop subprocess and get data
             if queue and perunSP:
                 log.info(f"Rank {self.comm.Get_rank()}: Getting queue contents")
                 nodeData = queue.get(block=True)
@@ -373,11 +379,11 @@ class Perun:
 
         else:
             try:
-                with open(str(app), "r") as scriptFile:
-                    exec(
-                        scriptFile.read(),
-                        {"__name__": "__main__", "__file__": app.name},
-                    )
+                if module_name:
+                    run_module(module_name, run_name="__main__")
+                else:
+                    run_path(str(app), run_name="__main__")
+
             except Exception as e:
                 log.error(
                     f"Rank {self.comm.Get_rank()}: Found error on monitored script: {str(app)}"

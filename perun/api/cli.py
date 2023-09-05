@@ -204,9 +204,17 @@ def export(input_file: str, output_format: str, mr_id: Optional[str]):
     callback=save_to_config_callback,
     expose_value=False,
 )
+@click.option(
+    "-m",
+    "--module",
+    help="Run script 'path/to/script.py' as a module (eq. to python -m path.to.script) instead of "
+         "as a standard top-level script (eq. to python path/to/script.py).",
+    is_flag=True,
+)
 @click.argument("script", type=click.Path(exists=True))
 @click.argument("script_args", nargs=-1)
 def monitor(
+    module: bool,
     script: str,
     script_args: tuple,
 ):
@@ -214,6 +222,7 @@ def monitor(
     Gather power consumption from hardware devices while SCRIPT [SCRIPT_ARGS] is running.
 
     SCRIPT is a path to the python script to monitor, run with arguments SCRIPT_ARGS.
+    MONITOR is a boolean which, when set to True, runs SCRIPT as a module.
     """
     # Setup script arguments
 
@@ -223,13 +232,21 @@ def monitor(
 
     filePath: Path = Path(script)
     log.debug(f"Script path: {filePath}")
-    argIndex = sys.argv.index(script)
-    sys.argv = sys.argv[argIndex:]
+
+    if module:
+        # if running as a module, construct the module name
+        moduleStr = str(filePath.with_suffix('')).replace('/', '.')
+        sys.argv = [moduleStr] + list(script_args)
+    else:
+        # if running as a script, keep the original script path
+        moduleStr = None
+        sys.argv = [script] + list(script_args)
+
     log.debug(f"Script args: { sys.argv }")
 
     sys.path.insert(0, str(filePath.parent.absolute()))
 
-    perun.monitor_application(filePath)
+    perun.monitor_application(filePath, moduleStr)
 
 
 def main():
