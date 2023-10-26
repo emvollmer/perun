@@ -214,9 +214,9 @@ def export(input_file: str, output_format: str, mr_id: Optional[str]):
 @click.argument("script", type=click.Path(exists=True))
 @click.argument("script_args", nargs=-1)
 def monitor(
-    module: bool,
-    script: str,
-    script_args: tuple,
+        module: bool,
+        script: str,
+        script_args: tuple,
 ):
     """
     Gather power consumption from hardware devices while SCRIPT [SCRIPT_ARGS] is running.
@@ -234,11 +234,17 @@ def monitor(
     log.debug(f"Script path: {filePath}")
 
     if module:
-        # find root package path (doesn't contain __ini__.py) to add to sys.path
+        # find root package path to add to sys.path
+        # (either it doesn't contain an __ini__.py or does plus requirements / .git)
+        # todo: This doesn't necessarily cover all cases...
         pkgPath = filePath.absolute().parent
         while pkgPath:
             initFile = Path(pkgPath, "__init__.py")
-            if not initFile.is_file():
+            if (not initFile.is_file() or
+                    (initFile.is_file() and any(file.name.startswith("requirements") for file in
+                                                pkgPath.iterdir() if file.is_file())) or
+                    (initFile.is_file() and Path(pkgPath, ".git").is_dir())
+            ):
                 break
             pkgPath = pkgPath.parent
 
@@ -254,7 +260,7 @@ def monitor(
         # add parent directory to system paths to search through
         sys.path.insert(0, str(filePath.parent.absolute()))
 
-    log.debug(f"Script args: { sys.argv }")
+    log.debug(f"Script args: {sys.argv}")
 
     perun.monitor_application(filePath, moduleStr)
 
